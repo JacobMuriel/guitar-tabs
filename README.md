@@ -6,9 +6,14 @@ no build step, no accounts, no API keys.
 
 ## What it does
 
-- **Paste AlphaTex** (the text format for tab notation) into the editor and it renders a
-  clean tab sheet below — standard notation, tablature, **chord diagrams** above the staff,
-  and **lyrics** under the staff.
+- **Two kinds of tab in one library:**
+  - **AlphaTex** — paste the text format into the editor and it renders a clean tab sheet
+    below: standard notation, tablature, **chord diagrams** above the staff, and **lyrics**
+    under the staff.
+  - **PDF** — click **Open PDF…** to load a PDF tab, view it rendered in the same viewer, and
+    save it to your library next to your AlphaTex songs. (Note: the app can't *convert* a PDF
+    into editable AlphaTex — that still needs the chatbot route below — it stores and displays
+    the PDF as-is.)
 - **Friendly errors.** If a paste won't parse, you get a plain-English message with the line
   number — copy it back to a chatbot and ask it to fix the AlphaTex.
 - **Library.** Save songs to your browser, click them in the sidebar to reload, delete with

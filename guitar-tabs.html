@@ -21,6 +21,10 @@
      Bravura music notation font, which is why notation looks crisp. -->
 <script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.3/dist/alphaTab.min.js"></script>
 
+<!-- PDF.js (pinned) renders saved PDF tabs to canvas. Used only when a library
+     item is a PDF; AlphaTex songs never touch it. -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+
 <style>
   :root {
     --bg:        #15171c;
@@ -281,8 +285,40 @@
     padding: 28px 32px;
     min-height: 200px;
   }
+  /* In PDF mode each page is its own white "paper", so the wrapper goes plain. */
+  #sheet-paper.pdf-mode {
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    max-width: none;
+  }
   /* alphaTab renders its SVG into this element */
   #alphatab {  }
+
+  /* PDF pages */
+  #pdf-pages { display: none; text-align: center; }
+  .pdf-page {
+    display: block;
+    margin: 0 auto 18px;
+    background: #fff;
+    border-radius: 4px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* PDF info bar (replaces the editor when viewing a PDF) */
+  #pdf-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  #pdf-bar .pdf-name { color: var(--text); font-weight: 600; }
 
   .viewer-placeholder {
     color: #9aa0aa;
@@ -349,6 +385,8 @@
       <button id="btn-render" class="primary">Render</button>
       <button id="btn-save">Save…</button>
       <button id="btn-new">New</button>
+      <button id="btn-openpdf" title="Open a PDF tab to view and save">Open PDF…</button>
+      <input type="file" id="pdf-file" accept="application/pdf,.pdf" hidden />
 
       <div class="field">
         <label for="capo">Capo</label>
@@ -372,12 +410,20 @@
         <textarea id="tex" spellcheck="false" placeholder="Paste AlphaTex here…"></textarea>
       </div>
 
+      <div id="pdf-bar">
+        <span>📄 Viewing PDF:</span>
+        <span id="pdf-name" class="pdf-name"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button id="btn-closepdf">Close PDF</button>
+      </div>
+
       <div id="error"></div>
 
       <div id="viewer-scroll">
         <div id="capo-label"></div>
         <div id="sheet-paper">
           <div id="alphatab"></div>
+          <div id="pdf-pages"></div>
         </div>
       </div>
     </div>
@@ -388,6 +434,18 @@
 
 <script>
 "use strict";
+
+/* PDF.js drives its page-render loop with requestAnimationFrame, which browsers
+   PAUSE for hidden/background tabs. If you switched tabs mid-render, a PDF could
+   stall forever. Fall back to a timer whenever the tab is hidden so rendering
+   always finishes; when the tab is visible we use the real (fast) rAF. */
+(function () {
+  const realRaf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) {
+    if (document.hidden) return setTimeout(() => cb(performance.now()), 16);
+    return realRaf(cb);
+  };
+})();
 
 /* =========================================================================
    1. Constants & a tiny starter example (proves chord diagrams + lyrics work)
@@ -419,11 +477,25 @@ const el = {
   zoomVal:    document.getElementById("zoom-val"),
   toast:      document.getElementById("toast"),
   importFile: document.getElementById("import-file"),
+  pdfFile:    document.getElementById("pdf-file"),
+  pdfPages:   document.getElementById("pdf-pages"),
+  pdfBar:     document.getElementById("pdf-bar"),
+  pdfName:    document.getElementById("pdf-name"),
+  sheet:      document.getElementById("sheet-paper"),
+  editorPane: document.getElementById("editor-pane"),
+  btnRender:  document.getElementById("btn-render"),
 };
 
 let api = null;            // the AlphaTabApi instance
 let currentSongId = null;  // which saved song is loaded (null = unsaved draft)
 let errorShownForRender = false; // guards against a generic error overwriting a detailed one
+let currentMode = "alphatex";    // "alphatex" | "pdf" — what the workspace is showing
+let currentPdf = null;           // { name, dataUrl } when a PDF is loaded/being viewed
+
+// Short unique id for a library entry
+function newId() {
+  return "s_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+}
 
 /* =========================================================================
    3. Helpers: storage
@@ -439,10 +511,26 @@ function loadLibrary() {
     return [];
   }
 }
+// Returns true on success. The most likely failure is storage being full
+// (browsers cap localStorage near 5 MB), usually caused by large saved PDFs.
 function saveLibrary(songs) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ songs }));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ songs }));
+    return true;
+  } catch (e) {
+    console.error("Could not save library", e);
+    showError(
+      "Couldn't save — storage is full.",
+      "Your browser's storage (about 5 MB) is full, usually from large PDFs. " +
+      "Delete a saved PDF or two, or use Export to back things up, then try again."
+    );
+    return false;
+  }
 }
 function saveDraft() {
+  // Only AlphaTex drafts are persisted — PDFs are too big to stash as a draft,
+  // and they're safe in the library once saved.
+  if (currentMode === "pdf") return;
   localStorage.setItem(DRAFT_KEY, JSON.stringify({
     tex: el.tex.value,
     capo: el.capo.value,
@@ -595,6 +683,102 @@ function scheduleRender() {
   saveDraft();
 }
 
+/* --- Mode switching: AlphaTex editor vs PDF viewer --- */
+function setMode(mode) {
+  currentMode = mode;
+  const pdf = mode === "pdf";
+  el.editorPane.style.display = pdf ? "none" : "";
+  el.pdfBar.style.display     = pdf ? "flex" : "none";
+  el.btnRender.style.display  = pdf ? "none" : "";
+  el.alphatab.style.display   = pdf ? "none" : "";
+  el.pdfPages.style.display   = pdf ? "block" : "none";
+  el.sheet.classList.toggle("pdf-mode", pdf);
+  if (pdf && currentPdf) el.pdfName.textContent = currentPdf.name || "PDF";
+}
+
+/* --- Open a PDF chosen from disk --- */
+function openPdfFile(file) {
+  if (!file) return;
+  const looksPdf = (file.type && file.type.indexOf("pdf") !== -1) || /\.pdf$/i.test(file.name);
+  if (!looksPdf) {
+    showError("That's not a PDF.", "Please choose a .pdf file.");
+    return;
+  }
+  if (typeof pdfjsLib === "undefined") {
+    showError("PDF viewer didn't load.", "Check your internet connection and reload, then try again.");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    currentPdf = { name: file.name.replace(/\.pdf$/i, ""), dataUrl: reader.result };
+    currentSongId = null;            // a freshly opened, not-yet-saved PDF
+    setMode("pdf");
+    renderSongList();
+    renderPdf(reader.result);
+  };
+  reader.onerror = () => showError("Couldn't read that PDF.", "Please try again.");
+  reader.readAsDataURL(file);
+}
+
+/* --- Render a PDF (all pages) to canvases at the current zoom --- */
+let pdfRenderToken = 0;   // lets a newer render cancel an in-flight older one
+function renderPdf(dataUrl) {
+  clearError();
+  const token = ++pdfRenderToken;
+  el.pdfPages.innerHTML = '<div class="viewer-placeholder">Loading PDF…</div>';
+  const scale = parseFloat(el.zoom.value) * 1.5;   // 1.5 ≈ a comfortable default size
+  const ratio = window.devicePixelRatio || 1;
+
+  pdfjsLib.getDocument({ data: dataUrlToUint8(dataUrl) }).promise.then(async (pdf) => {
+    if (token !== pdfRenderToken) return;          // superseded
+    el.pdfPages.innerHTML = "";
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      if (token !== pdfRenderToken) return;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.className = "pdf-page";
+      const ctx = canvas.getContext("2d");
+      canvas.width  = Math.floor(viewport.width  * ratio);
+      canvas.height = Math.floor(viewport.height * ratio);
+      canvas.style.width  = viewport.width + "px";
+      canvas.style.height = viewport.height + "px";
+      el.pdfPages.appendChild(canvas);
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null,
+      }).promise;
+    }
+  }).catch((e) => {
+    if (token !== pdfRenderToken) return;
+    console.error("PDF error:", e);
+    el.pdfPages.innerHTML = "";
+    showError("Couldn't open this PDF.",
+      (e && e.message) || "The file may be damaged or password-protected.");
+  });
+}
+
+// PDFs are stored as data: URLs; PDF.js wants the raw bytes. Decode each time
+// (getDocument consumes the buffer, so re-renders need a fresh copy).
+function dataUrlToUint8(dataUrl) {
+  const base64 = String(dataUrl).split(",")[1] || "";
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+// Leave PDF view and return to the AlphaTex editor
+function closePdf() {
+  currentPdf = null;
+  currentSongId = null;
+  el.pdfPages.innerHTML = "";
+  setMode("alphatex");
+  renderSongList();
+  render();
+}
+
 /* =========================================================================
    7. Library rendering & actions
    ========================================================================= */
@@ -616,7 +800,8 @@ function renderSongList() {
 
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = song.name;
+    const icon = song.type === "pdf" ? "📄 " : "🎵 ";
+    name.textContent = icon + song.name;
     name.title = song.name;
 
     const del = document.createElement("button");
@@ -639,44 +824,64 @@ function loadSong(id) {
   const song = loadLibrary().find((s) => s.id === id);
   if (!song) return;
   currentSongId = id;
-  el.tex.value = song.tex || "";
   el.capo.value = song.capo || "";
-  saveDraft();
-  renderSongList();
-  render();
+  updateCapoLabel();
+
+  if (song.type === "pdf" && song.pdfData) {
+    currentPdf = { name: song.name, dataUrl: song.pdfData };
+    setMode("pdf");
+    renderSongList();
+    renderPdf(song.pdfData);
+  } else {
+    currentPdf = null;
+    el.tex.value = song.tex || "";
+    setMode("alphatex");
+    saveDraft();
+    renderSongList();
+    render();
+  }
 }
 
 function saveSong() {
-  const tex = el.tex.value.trim();
-  if (!tex) {
+  const isPdf = currentMode === "pdf";
+
+  if (isPdf) {
+    if (!currentPdf) { showError("Nothing to save.", "Open a PDF first."); return; }
+  } else if (!el.tex.value.trim()) {
     showError("Nothing to save.", "Paste some AlphaTex into the editor first.");
     return;
   }
+
   const songs = loadLibrary();
   const existing = currentSongId ? songs.find((s) => s.id === currentSongId) : null;
 
-  const defaultName = existing ? existing.name : guessTitle(tex);
+  const defaultName = existing ? existing.name
+                    : isPdf ? (currentPdf.name || "Untitled PDF")
+                    : guessTitle(el.tex.value);
   const name = prompt("Save song as:", defaultName);
   if (name === null) return;                 // user cancelled
   const trimmed = name.trim();
   if (!trimmed) return;
 
+  // Build the fields for the current item type
+  const fields = isPdf
+    ? { type: "pdf",      tex: "",                  pdfData: currentPdf.dataUrl }
+    : { type: "alphatex", tex: el.tex.value.trim(), pdfData: "" };
+
   if (existing && existing.name === trimmed) {
     // Update the currently loaded song in place
-    existing.tex = tex;
-    existing.capo = el.capo.value.trim();
+    Object.assign(existing, fields, { capo: el.capo.value.trim() });
+    if (!saveLibrary(songs)) return;
   } else {
     // New entry (or "save as" under a new name)
-    const song = {
-      id: "s_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-      name: trimmed,
-      tex,
-      capo: el.capo.value.trim(),
-    };
+    const song = Object.assign(
+      { id: newId(), name: trimmed, capo: el.capo.value.trim() },
+      fields
+    );
     songs.push(song);
+    if (!saveLibrary(songs)) return;
     currentSongId = song.id;
   }
-  saveLibrary(songs);
   saveDraft();
   renderSongList();
   showToast("Saved “" + trimmed + "”");
@@ -701,8 +906,10 @@ function deleteSong(id) {
 
 function newSong() {
   currentSongId = null;
+  currentPdf = null;
   el.tex.value = "";
   el.capo.value = "";
+  setMode("alphatex");
   saveDraft();
   renderSongList();
   render();
@@ -780,26 +987,52 @@ function importLibrary(file) {
 }
 
 function normalizeSong(s) {
-  if (!s || typeof s.tex !== "string") return null;
+  if (!s) return null;
+  const capo = s.capo ? String(s.capo) : "";
+  const isPdf = s.type === "pdf" || (!!s.pdfData && !s.tex);
+
+  if (isPdf) {
+    if (!s.pdfData) return null;
+    return {
+      id: newId(),
+      name: s.name ? String(s.name) : "Untitled PDF",
+      type: "pdf",
+      tex: "",
+      pdfData: String(s.pdfData),
+      capo,
+    };
+  }
+
+  if (typeof s.tex !== "string") return null;
   return {
-    id: "s_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    id: newId(),
     name: (s.name && String(s.name)) || guessTitle(s.tex),
+    type: "alphatex",
     tex: s.tex,
-    capo: s.capo ? String(s.capo) : "",
+    pdfData: "",
+    capo,
   };
 }
 
 /* =========================================================================
    9. Zoom
    ========================================================================= */
+let zoomTimer = null;
 function applyZoom() {
   const z = parseFloat(el.zoom.value);
   el.zoomVal.textContent = Math.round(z * 100) + "%";
-  if (api) {
-    api.settings.display.scale = z;
-    api.updateSettings();
-    api.render();
-  }
+  // Debounce the actual re-render so dragging the slider stays smooth
+  // (re-rendering every PDF page on each tick would lag).
+  clearTimeout(zoomTimer);
+  zoomTimer = setTimeout(() => {
+    if (currentMode === "pdf") {
+      if (currentPdf) renderPdf(currentPdf.dataUrl);
+    } else if (api) {
+      api.settings.display.scale = z;
+      api.updateSettings();
+      api.render();
+    }
+  }, 180);
 }
 
 /* =========================================================================
@@ -811,10 +1044,16 @@ function wireEvents() {
   document.getElementById("btn-new").addEventListener("click", newSong);
   document.getElementById("btn-export").addEventListener("click", exportLibrary);
   document.getElementById("btn-import").addEventListener("click", () => el.importFile.click());
+  document.getElementById("btn-openpdf").addEventListener("click", () => el.pdfFile.click());
+  document.getElementById("btn-closepdf").addEventListener("click", closePdf);
 
   el.importFile.addEventListener("change", (e) => {
     if (e.target.files && e.target.files[0]) importLibrary(e.target.files[0]);
     e.target.value = "";   // allow re-importing the same file
+  });
+  el.pdfFile.addEventListener("change", (e) => {
+    if (e.target.files && e.target.files[0]) openPdfFile(e.target.files[0]);
+    e.target.value = "";   // allow re-opening the same file
   });
 
   el.tex.addEventListener("input", scheduleRender);
@@ -829,8 +1068,15 @@ function boot() {
     return;
   }
 
+  // Point PDF.js at its matching CDN worker (pinned to the same version).
+  if (typeof pdfjsLib !== "undefined") {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+
   initAlphaTab();
   wireEvents();
+  setMode("alphatex");
   renderSongList();
 
   // Restore last editing session, or fall back to the starter example.
