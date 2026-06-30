@@ -1,0 +1,9 @@
+# Render Blueprint — deploys this folder as a static site (no build step).
+# You can either use this file (New + Blueprint in the Render dashboard) or set
+# the same values by hand (New + Static Site). See README for click-by-click steps.
+services:
+  - name: guitar-tab-viewer
+    type: web
+    runtime: static
+    buildCommand: "echo no build step needed"
+    staticPublishPath: .

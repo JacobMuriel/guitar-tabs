@@ -1,76 +1,101 @@
 # 🎸 Guitar Tab Viewer
 
-A personal, self-contained guitar-tab viewer and library. It's a **single HTML file** —
-just double-click `guitar-tabs.html` to open it in your browser. No server, no install,
-no build step, no accounts, no API keys.
+A personal guitar-tab viewer and library. Paste **AlphaTex** (a text format for tab
+notation) and it renders a clean tab sheet — standard notation, tablature, **chord
+fingering diagrams above each bar**, and **lyrics** under the staff. Your songs are saved
+as files in a **folder on your Mac** (point it at iCloud Drive to sync across devices).
 
-## What it does
+It's a plain static site — no framework, no build step, no backend, no API keys, no AI.
+The only network use is loading the alphaTab library + music fonts from a CDN.
 
-- **Two kinds of tab in one library:**
-  - **AlphaTex** — paste the text format into the editor and it renders a clean tab sheet
-    below: standard notation, tablature, **chord fingering diagrams above each bar**, and
-    **lyrics** under the staff.
-  - **PDF** — click **Open PDF…** to load a PDF tab, view it rendered in the same viewer, and
-    save it to your library next to your AlphaTex songs. (Note: the app can't *convert* a PDF
-    into editable AlphaTex — that still needs the chatbot route below — it stores and displays
-    the PDF as-is.)
-- **Friendly errors.** If a paste won't parse, you get a plain-English message with the line
-  number — copy it back to a chatbot and ask it to fix the AlphaTex.
-- **Library.** Save songs to your browser, click them in the sidebar to reload, delete with
-  a confirm.
-- **Backups.** Export your whole library to one `.json` file and import it back later (handy
-  because browser storage can get wiped).
-- **Zoom** slider and a **Capo** note field (just a reminder label — it never transposes
-  anything).
+## Files
 
-## Chord diagrams (the fingering grids)
+| File | What it is |
+|------|------------|
+| `index.html` | Page structure only |
+| `style.css` | All styling (dark, minimal) |
+| `app.js` | All logic (rendering + the folder library) |
+| `render.yaml` | Optional Render deploy config |
+
+## Browser requirement (Chrome)
+
+The library reads and writes files in a folder using the **File System Access API**
+(`window.showDirectoryPicker`), which **only works in Google Chrome** (and other Chromium
+browsers like Edge/Brave). Open the site in Chrome. In a browser that doesn't support it
+(e.g. Safari), the viewer still renders tabs, but a clear message explains that saving to a
+folder needs Chrome.
+
+## The library (folder on disk)
+
+- **First visit:** click **Choose library folder…** and pick a folder (tip: one inside
+  iCloud Drive so it syncs). Chrome remembers the folder across reloads.
+- **Each song is one `.alphatex` file** in that folder; the filename is the song name.
+- The sidebar lists every `.alphatex` file. Click one to load + render it.
+- **Save** writes the file. New song → it asks for a name; an already-loaded song → it
+  overwrites that file.
+- **Delete** (the ✕) removes the file, with a confirm.
+- **Change folder…** (bottom of the sidebar) re-picks the folder.
+- **Permissions:** for security, Chrome re-asks permission to the folder once per session.
+  When that happens you'll see a **Reconnect folder** button — click it and choose Allow.
+
+### Capo
+
+The capo field is a **reminder label only** (it never transposes). It's stored inside the
+song file as a first line `// capo: 7th fret` — a comment alphaTab ignores — so each file
+stays self-contained.
+
+## Chord diagrams
 
 When your tab **names** a chord on a beat with `{ch "Em"}`, the app draws the **fingering
-grid above that bar** automatically — you don't have to define how to play the chord. It
-fills the fingering in from a built-in dictionary of common chords (open chords, 7ths, sus,
-barre chords, sharps/flats). If a chord name isn't in the dictionary, its name still shows
-and a small note tells you; you can supply your own voicing with a `\chord ("name" …)` line.
+grid above that bar** automatically, filling the fingering from a built-in dictionary of
+common chords. If a chord name isn't known, its name still shows and a small note tells you;
+you can supply your own voicing with a `\chord ("name" …)` line. Toggle the grids with the
+**Chord diagrams** checkbox.
 
-Toggle this off any time with the **Chord diagrams** checkbox in the toolbar.
+When asking a chatbot to turn a tab screenshot into AlphaTex, include:
 
-The one thing the tab needs is the `{ch "…"}` chord markers. So when you ask a chatbot to
-make the AlphaTex (below), include this in your request:
-
-> Mark every chord change on the beat with `{ch "ChordName"}` (e.g. `{ch "Em"}`, `{ch "B7"}`),
-> using standard chord names, so the viewer can draw the fingering diagrams.
+> Mark every chord change with `{ch "ChordName"}` using standard chord names, so the viewer
+> can draw the fingering diagrams.
 
 ## How tabs get made
 
-The app does **not** use AI itself. The intended workflow:
+The app does **not** use AI. The workflow: screenshot a tab → ask a chatbot to convert it to
+AlphaTex → paste the AlphaTex here → Save. AlphaTex docs:
+https://alphatab.net/docs/alphatex/introduction
 
-1. Take a screenshot of a tab.
-2. Chat with Claude (or any chatbot) and ask it to convert it to **AlphaTex**.
-3. Paste the AlphaTex into this app and render.
+## Run it locally (optional)
 
-## AlphaTex quick reference
+The File System Access API needs a secure context, so use a local server (not a `file://`
+double-click):
 
-```
-\title "Song Name"
-\subtitle "Artist"
-\tempo 90
-.
-\chord ("C" 0 1 0 2 3 x)
-\chord ("G" 3 0 0 0 2 3)
-(0.1 1.2 0.3 2.4 3.5){ch "C" lyrics "Twin-"} (0.1 1.2 0.3){lyrics "kle"} |
+```bash
+cd guitar-tabs
+python3 -m http.server 8000
+# then open http://localhost:8000 in Chrome
 ```
 
-- `fret.string` — e.g. `3.6` is fret 3 on the 6th (low E) string. String 1 = high E.
-- `\chord ("Name" e B G D A E)` — fret per string, high-to-low; `x` = muted.
-- `{ch "Name"}` on a beat shows the chord (and its diagram if defined).
-- `{lyrics "word"}` on a beat shows a lyric syllable underneath.
+## Deploy on Render (static site)
 
-Full docs: https://alphatab.net/docs/alphatex/introduction
+The repo is already a deployable static site. Two ways:
 
-## Tech notes
+### Option A — dashboard (simplest)
 
-- Rendering is done by [alphaTab](https://alphatab.net) (`@coderline/alphatab`), loaded from
-  the jsDelivr CDN at a **pinned version (1.8.3)** so a future library update can't silently
-  break the file. The only requirement is an internet connection so the library and its music
-  fonts can load.
-- Songs live in your browser's `localStorage`, scoped to this file on this computer. Use
-  Export regularly if the songs matter to you.
+1. Push this repo to GitHub (done — `JacobMuriel/guitar-tabs`).
+2. Go to https://dashboard.render.com → **New +** → **Static Site**.
+3. Connect GitHub and pick the **guitar-tabs** repo.
+4. Fill in:
+   - **Name:** `guitar-tab-viewer` (becomes part of the URL)
+   - **Branch:** `main`
+   - **Build Command:** *(leave empty)*
+   - **Publish Directory:** `.`  ← a single dot (the repo root, where `index.html` lives)
+5. Click **Create Static Site**. Render builds and gives you a URL like
+   `https://guitar-tab-viewer.onrender.com` — served over HTTPS (which the folder API needs).
+6. Open that URL in **Chrome** and bookmark it.
+
+### Option B — Blueprint (uses `render.yaml`)
+
+1. Render dashboard → **New +** → **Blueprint**.
+2. Connect the **guitar-tabs** repo. Render reads `render.yaml` and proposes the static site.
+3. Click **Apply**.
+
+Every push to `main` auto-redeploys.

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Guitar Tab Viewer</title>
+
+<!--
+  Guitar Tab Viewer — a plain static site (no framework, no build step).
+  - index.html : structure only (this file)
+  - style.css  : all styling
+  - app.js     : all logic
+
+  Notation is rendered by alphaTab (https://alphatab.net), loaded from the
+  jsDelivr CDN at a pinned version so a future library change can't break us.
+
+  The song library is a FOLDER ON YOUR DISK, read/written through the browser's
+  File System Access API (Chrome-only). No backend, no API keys, no AI.
+-->
+
+<!-- alphaTab UMD build. The script auto-detects its own CDN folder to load the
+     Bravura music notation font, which is why notation looks crisp. -->
+<script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.3/dist/alphaTab.min.js"></script>
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="boot">Loading notation engine…</div>
+
+<div id="app">
+  <!-- ===================== Sidebar (library) ===================== -->
+  <aside id="sidebar">
+    <header>
+      <h1>🎸 Tab Library</h1>
+      <p id="folder-line">A folder on your Mac</p>
+    </header>
+
+    <!-- Connect / reconnect / unsupported panel (shown when not connected) -->
+    <div id="fs-status">
+      <p id="fs-msg"></p>
+      <button id="btn-connect" class="primary"></button>
+    </div>
+
+    <!-- File list (shown when connected) -->
+    <div id="song-list"></div>
+
+    <!-- Settings (shown when connected) -->
+    <div id="library-actions">
+      <button id="btn-change" title="Pick a different library folder">Change folder…</button>
+    </div>
+  </aside>
+
+  <!-- ===================== Main ===================== -->
+  <section id="main">
+    <div id="toolbar">
+      <button id="btn-render" class="primary">Render</button>
+      <button id="btn-save">Save…</button>
+      <button id="btn-new">New</button>
+
+      <div class="field">
+        <label for="capo">Capo</label>
+        <input type="text" id="capo" placeholder="e.g. 7th fret" />
+      </div>
+
+      <label class="field check" title="Draw fingering grids above the bars for every chord named in your tab">
+        <input type="checkbox" id="chord-diagrams" checked />
+        Chord diagrams
+      </label>
+
+      <div class="spacer"></div>
+
+      <div class="field">
+        <span>Zoom</span>
+        <input type="range" id="zoom" min="0.5" max="2" step="0.1" value="1" />
+        <span id="zoom-val">100%</span>
+      </div>
+    </div>
+
+    <div id="workspace">
+      <div id="editor-pane">
+        <div id="editor-head">
+          <label for="tex">AlphaTex — paste your tab here, then press Render (auto-renders as you type)</label>
+        </div>
+        <textarea id="tex" spellcheck="false" placeholder="Paste AlphaTex here…"></textarea>
+      </div>
+
+      <div id="error"></div>
+
+      <div id="viewer-scroll">
+        <div id="capo-label"></div>
+        <div id="chord-note"></div>
+        <div id="sheet-paper">
+          <div id="alphatab"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
