@@ -299,7 +299,7 @@ function applyZoom() {
 function sanitizeName(name) {
   return String(name).replace(/[\/\\:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim();
 }
-function fileToName(filename) { return filename.replace(/\.alphatex$/i, ""); }
+function fileToName(filename) { return filename.replace(/\.(alphatex|txt)$/i, ""); }
 function nameToFile(name) { return sanitizeName(name) + FILE_EXT; }
 
 // A song file may start with "// capo: <text>" — a comment alphaTab ignores.
@@ -371,7 +371,9 @@ async function ensurePermission(handle) {
 async function listAlphatexFiles(handle) {
   const names = [];
   for await (const [name, h] of handle.entries()) {
-    if (h.kind === "file" && /\.alphatex$/i.test(name)) names.push(name);
+    // We list AlphaTex tabs whether they're saved as .alphatex (what Save writes)
+    // or .txt (handy if you drop in a plain text file containing AlphaTex).
+    if (h.kind === "file" && /\.(alphatex|txt)$/i.test(name)) names.push(name);
   }
   names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   return names;
@@ -597,6 +599,12 @@ function wireEvents() {
   document.getElementById("btn-new").addEventListener("click", newSong);
   el.btnConnect.addEventListener("click", onConnectClick);
   el.btnChange.addEventListener("click", chooseFolder);
+
+  // If you add/rename/delete files in the folder from Finder while the app is
+  // open, re-scan when you switch back to the tab so they appear without reloading.
+  const refreshIfConnected = () => { if (fsState === "connected") refreshList(); };
+  window.addEventListener("focus", refreshIfConnected);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshIfConnected(); });
 
   el.tex.addEventListener("input", scheduleRender);
   el.capo.addEventListener("input", () => { updateCapoLabel(); saveDraft(); });
