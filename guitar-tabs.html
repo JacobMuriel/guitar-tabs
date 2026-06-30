@@ -274,6 +274,17 @@
     letter-spacing: 0.3px;
   }
   #capo-label.show { display: block; }
+  #chord-note {
+    display: none;
+    max-width: 1000px;
+    margin: 0 auto 10px;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  #chord-note.show { display: block; }
+  .field.check { cursor: pointer; user-select: none; }
+  .field.check input { accent-color: var(--accent); }
 
   #sheet-paper {
     background: var(--paper);
@@ -393,6 +404,11 @@
         <input type="text" id="capo" placeholder="e.g. 7th fret" />
       </div>
 
+      <label class="field check" title="Draw fingering grids above the bars for every chord named in your tab">
+        <input type="checkbox" id="chord-diagrams" checked />
+        Chord diagrams
+      </label>
+
       <div class="spacer"></div>
 
       <div class="field">
@@ -421,6 +437,7 @@
 
       <div id="viewer-scroll">
         <div id="capo-label"></div>
+        <div id="chord-note"></div>
         <div id="sheet-paper">
           <div id="alphatab"></div>
           <div id="pdf-pages"></div>
@@ -454,13 +471,13 @@ const STORAGE_KEY   = "guitarTabs.library.v1";   // saved songs
 const DRAFT_KEY     = "guitarTabs.draft.v1";      // unsaved editor contents
 
 const STARTER_TEX = `\\title "Welcome"
-\\subtitle "Your tab viewer is working"
-\\tempo 90
+\\subtitle "Chord grids are drawn above the bars automatically"
+\\tempo 73
 .
-\\chord ("C" 0 1 0 2 3 x)
-\\chord ("G" 3 0 0 0 2 3)
-(0.1 1.2 0.3 2.4 3.5){ch "C" lyrics "Twin-"} (0.1 1.2 0.3){lyrics "kle"} |
-(3.1 0.2 0.3 0.4 2.5 3.6){ch "G" lyrics "twin-"} (3.1 0.2 0.3){lyrics "kle"} |`;
+:4 (0.6 2.5 2.4 0.3 0.2 0.1){ch "Em"} (0.6 2.5 2.4 0.3 0.2 0.1) (0.6 2.5 2.4 0.3 0.2 0.1) (0.6 2.5 2.4 0.3 0.2 0.1) |
+(2.5 1.4 2.3 0.2 2.1){ch "B7"} (2.5 1.4 2.3 0.2 2.1) (2.5 1.4 2.3 0.2 2.1) (2.5 1.4 2.3 0.2 2.1) |
+(0.4 2.3 3.2 0.1){ch "Dsus2"} (0.4 2.3 3.2 0.1) (0.4 2.3 3.2 0.1) (0.4 2.3 3.2 0.1) |
+(3.6 2.5 0.4 0.3 0.2 3.1){ch "G"} (3.6 2.5 0.4 0.3 0.2 3.1) (3.6 2.5 0.4 0.3 0.2 3.1) (3.6 2.5 0.4 0.3 0.2 3.1) |`;
 
 /* =========================================================================
    2. Grab elements
@@ -471,6 +488,8 @@ const el = {
   tex:        document.getElementById("tex"),
   capo:       document.getElementById("capo"),
   capoLabel:  document.getElementById("capo-label"),
+  chordNote:  document.getElementById("chord-note"),
+  chordToggle: document.getElementById("chord-diagrams"),
   error:      document.getElementById("error"),
   alphatab:   document.getElementById("alphatab"),
   zoom:       document.getElementById("zoom"),
@@ -655,7 +674,112 @@ function formatDiagnostics(err) {
 }
 
 /* =========================================================================
-   6. Rendering
+   6a. Chord diagrams — built-in fingering dictionary
+   -------------------------------------------------------------------------
+   Each value lists frets for the 6 strings in alphaTab's \chord order:
+   high-e, B, G, D, A, low-E   ("x" = muted/not played).
+   When your tab NAMES a chord (e.g. {ch "Em"}) but doesn't define how to play
+   it, we look it up here and inject the definition so alphaTab draws the grid.
+   ========================================================================= */
+const CHORD_LIBRARY = {
+  // --- A ---
+  "A": "0 2 2 2 0 x", "Am": "0 1 2 2 0 x", "A7": "0 2 0 2 0 x",
+  "Amaj7": "0 2 1 2 0 x", "Am7": "0 1 0 2 0 x", "Asus2": "0 0 2 2 0 x", "Asus4": "0 3 2 2 0 x",
+  // --- B ---
+  "B": "2 4 4 4 2 x", "Bm": "2 3 4 4 2 x", "B7": "2 0 2 1 2 x", "Bm7": "2 0 2 0 2 x",
+  // --- C ---
+  "C": "0 1 0 2 3 x", "C7": "0 1 3 2 3 x", "Cmaj7": "0 0 0 2 3 x", "Cadd9": "3 3 0 2 3 x", "Cm": "3 4 5 5 3 x",
+  // --- D ---
+  "D": "2 3 2 0 x x", "Dm": "1 3 2 0 x x", "D7": "2 1 2 0 x x", "Dmaj7": "2 2 2 0 x x",
+  "Dsus2": "0 3 2 0 x x", "Dsus4": "3 3 2 0 x x", "Dm7": "1 1 2 0 x x",
+  // --- E ---
+  "E": "0 0 1 2 2 0", "Em": "0 0 0 2 2 0", "E7": "0 0 1 0 2 0", "Em7": "0 0 0 0 2 0",
+  "Emaj7": "0 0 1 1 2 0", "Esus4": "0 0 2 2 2 0",
+  // --- F ---
+  "F": "1 1 2 3 3 1", "Fm": "1 1 1 3 3 1", "Fmaj7": "0 1 2 3 x x", "F7": "1 1 2 1 3 1",
+  // --- F# / Gb ---
+  "F#": "2 2 3 4 4 2", "F#m": "2 2 2 4 4 2", "F#m7": "2 2 2 2 4 2", "Gb": "2 2 3 4 4 2",
+  // --- G ---
+  "G": "3 0 0 0 2 3", "G7": "1 0 0 0 2 3", "Gmaj7": "2 0 0 0 2 3", "Gm": "3 3 3 5 5 3", "Gsus4": "3 1 0 0 3 3",
+  // --- sharps/flats commonly seen ---
+  "G#": "4 4 5 6 6 4", "G#m": "4 4 4 6 6 4", "Ab": "4 4 5 6 6 4",
+  "A#": "3 3 3 3 1 x", "Bb": "3 3 3 3 1 x", "Bbm": "2 2 3 3 1 x", "A#m": "2 2 3 3 1 x",
+  "C#": "4 6 6 6 4 x", "Db": "4 6 6 6 4 x", "C#m": "4 5 6 6 4 x",
+  "D#": "x x 1 3 4 x", "Eb": "x x 1 3 4 x",
+};
+
+// Look up a chord by name (exact, then a light case-tolerant fallback).
+function lookupChord(name) {
+  if (CHORD_LIBRARY[name]) return CHORD_LIBRARY[name];
+  // tolerate "EM" / "em" by normalising the root letter + a lowercase "m"
+  const norm = name.replace(/^([a-gA-G])/, (c) => c.toUpperCase());
+  return CHORD_LIBRARY[norm] || null;
+}
+
+let chordDiagramsOn = true;          // toolbar toggle
+let lastMissingChords = [];          // chords we had no fingering for
+
+/* Add inline chord diagrams + auto-define any named-but-undefined chords.
+   We do this at RENDER time only — the text you typed and save stays clean. */
+function prepareTex(tex) {
+  lastMissingChords = [];
+  if (!chordDiagramsOn) { showChordNote([]); return tex; }
+
+  // Chords referenced on beats: {ch "Em"}
+  const refs = [];
+  const seenRef = new Set();
+  let m;
+  const reRef = /ch\s+"([^"]+)"/g;
+  while ((m = reRef.exec(tex))) {
+    const n = m[1].trim();
+    if (n && !seenRef.has(n)) { seenRef.add(n); refs.push(n); }
+  }
+
+  // Chords already defined by the user: \chord ("Em" ...)
+  const defined = new Set();
+  const reDef = /\\chord\s*\(\s*"([^"]+)"/g;
+  while ((m = reDef.exec(tex))) defined.add(m[1].trim());
+
+  const newDefs = [];
+  const missing = [];
+  for (const name of refs) {
+    if (defined.has(name)) continue;          // respect the user's own voicing
+    const frets = lookupChord(name);
+    if (frets) newDefs.push('\\chord ("' + name + '" ' + frets + ')');
+    else missing.push(name);
+  }
+  lastMissingChords = missing;
+  showChordNote(missing);
+
+  const hasChords = refs.length > 0 || defined.size > 0;
+  if (!hasChords) return tex;                  // no chords at all — nothing to add
+
+  // Insert directives in the right sections: \chordDiagramsInScore is SCORE
+  // metadata (before the "." separator); \chord defs are STAFF-level (after it).
+  const lines = tex.split(/\r?\n/);
+  let dot = lines.findIndex((l) => l.trim() === ".");
+  if (dot === -1) {
+    // No separator: add one right after the leading \metadata lines.
+    let last = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (t === "") continue;
+      if (t.startsWith("\\")) last = i; else break;
+    }
+    const at = last + 1;
+    lines.splice(at, 0, ".");
+    dot = at;
+  }
+
+  // Insert after the dot first (doesn't shift the dot index), then before it.
+  if (newDefs.length) lines.splice(dot + 1, 0, ...newDefs);
+  if (!/\\chordDiagramsInScore/.test(tex)) lines.splice(dot, 0, "\\chordDiagramsInScore true");
+
+  return lines.join("\n");
+}
+
+/* =========================================================================
+   6b. Rendering
    ========================================================================= */
 function render() {
   const tex = el.tex.value;
@@ -663,15 +787,36 @@ function render() {
   errorShownForRender = false;   // reset before this render's error events fire
   if (!tex.trim()) {
     clearError();
+    showChordNote([]);
     api.tex("");   // clears the sheet
     return;
   }
   clearError();
   try {
+    // When auto-diagrams are on we draw grids INLINE above each bar (via
+    // \chordDiagramsInScore), so hide alphaTab's duplicate summary list at the
+    // top. When off, leave the default (a top list only if the user defined chords).
+    const elements = new Map();
+    if (chordDiagramsOn) elements.set(alphaTab.NotationElement.ChordDiagrams, false);
+    api.settings.notation.elements = elements;
+    api.updateSettings();
     // tex() parses + renders. Parse errors come back via the api.error event.
-    api.tex(tex);
+    api.tex(prepareTex(tex));
   } catch (e) {
     showError("Couldn't render this AlphaTex.", cleanErrorMessage(e.message || e));
+  }
+}
+
+// Gentle note when a named chord isn't in our dictionary (so its grid is missing).
+function showChordNote(missing) {
+  if (!el.chordNote) return;
+  if (missing && missing.length) {
+    el.chordNote.textContent =
+      "No built-in fingering for: " + missing.join(", ") +
+      " — its name still shows; add \\chord (\"name\" …) to draw its grid.";
+    el.chordNote.classList.add("show");
+  } else {
+    el.chordNote.classList.remove("show");
   }
 }
 
@@ -1059,6 +1204,10 @@ function wireEvents() {
   el.tex.addEventListener("input", scheduleRender);
   el.capo.addEventListener("input", () => { updateCapoLabel(); saveDraft(); });
   el.zoom.addEventListener("input", applyZoom);
+  el.chordToggle.addEventListener("change", () => {
+    chordDiagramsOn = el.chordToggle.checked;
+    if (currentMode === "alphatex") render();
+  });
 }
 
 function boot() {

@@ -8,8 +8,8 @@ no build step, no accounts, no API keys.
 
 - **Two kinds of tab in one library:**
   - **AlphaTex** — paste the text format into the editor and it renders a clean tab sheet
-    below: standard notation, tablature, **chord diagrams** above the staff, and **lyrics**
-    under the staff.
+    below: standard notation, tablature, **chord fingering diagrams above each bar**, and
+    **lyrics** under the staff.
   - **PDF** — click **Open PDF…** to load a PDF tab, view it rendered in the same viewer, and
     save it to your library next to your AlphaTex songs. (Note: the app can't *convert* a PDF
     into editable AlphaTex — that still needs the chatbot route below — it stores and displays
@@ -22,6 +22,22 @@ no build step, no accounts, no API keys.
   because browser storage can get wiped).
 - **Zoom** slider and a **Capo** note field (just a reminder label — it never transposes
   anything).
+
+## Chord diagrams (the fingering grids)
+
+When your tab **names** a chord on a beat with `{ch "Em"}`, the app draws the **fingering
+grid above that bar** automatically — you don't have to define how to play the chord. It
+fills the fingering in from a built-in dictionary of common chords (open chords, 7ths, sus,
+barre chords, sharps/flats). If a chord name isn't in the dictionary, its name still shows
+and a small note tells you; you can supply your own voicing with a `\chord ("name" …)` line.
+
+Toggle this off any time with the **Chord diagrams** checkbox in the toolbar.
+
+The one thing the tab needs is the `{ch "…"}` chord markers. So when you ask a chatbot to
+make the AlphaTex (below), include this in your request:
+
+> Mark every chord change on the beat with `{ch "ChordName"}` (e.g. `{ch "Em"}`, `{ch "B7"}`),
+> using standard chord names, so the viewer can draw the fingering diagrams.
 
 ## How tabs get made
 
